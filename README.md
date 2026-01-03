@@ -1,6 +1,21 @@
 # Node Automation (n8n - nodemation) [tf-proxmox-n8n](https://github.com/lucidsolns/tf-proxmox-n8n)
 
-A deployment of n8n on proxmox with flatcar linux
+A deployment of n8n on proxmox with Flatcar Linux. The containers
+are run with Podman and Quadlet.
+
+The deployment is:
+  - a master n8n node
+  - a worker n8n node
+  - two runner nodes
+  - a redis and postgres container for storage
+
+
+# Owner Account
+
+n8n does not use environment variables for the owner account's email or password. The initial
+owner account is set up interactively when the n8n instance starts for the first time.
+
+Thus I would highly recommend not making the site public until this is done.
 
 # Links
 

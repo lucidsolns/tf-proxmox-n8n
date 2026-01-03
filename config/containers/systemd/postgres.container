@@ -1,0 +1,33 @@
+[Unit]
+Description=PostgreSQL (n8n)
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=docker.io/library/postgres:16
+ContainerName=postgres
+Network=db_bridge.network
+
+PublishPort=127.0.0.1:5432:5432
+PublishPort=[::1]:5432:5432
+
+EnvironmentFile=/etc/postgres.env
+
+Volume=/srv/postgres/data:/var/lib/postgresql/data:Z
+Volume=/etc/postgresql/postgresql.conf:/etc/postgresql/postgresql.conf:Z
+
+StopSignal=SIGTERM
+StopTimeout=120
+
+#  The health check gets translated to a unit file in the 'X-Container' section and does
+#  not have the environment variables defined. They will be loaded into the container
+#  thus the $${} syntax to defer the evaluation until the health check is run inside the
+#  container.
+#
+HealthCmd=pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}
+HealthInterval=5s
+HealthTimeout=5s
+HealthRetries=10
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,15 @@
+[Unit]
+Description=n8n runner %i
+After=n8n.service
+Wants=n8n.service
+
+[Container]
+Image=docker.io/n8nio/runners:latest
+ContainerName=n8n-runner-%i
+Network=host
+
+EnvironmentFile=/etc/n8n-runner-%i.env
+Label=io.containers.autoupdate=registry
+
+[Install]
+WantedBy=multi-user.target

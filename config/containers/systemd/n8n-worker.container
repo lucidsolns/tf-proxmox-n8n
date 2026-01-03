@@ -1,0 +1,22 @@
+[Unit]
+Description=n8n worker
+After=n8n.service postgres.service redis.service
+Wants=n8n.service
+
+[Container]
+Image=docker.n8n.io/n8nio/n8n:latest
+ContainerName=n8n-worker
+Exec=worker
+Network=host
+
+EnvironmentFile=/etc/n8n.env
+Environment=N8N_PORT=5680
+Environment=QUEUE_HEALTH_CHECK_PORT=5680
+Environment=N8N_RUNNERS_BROKER_PORT=5681
+
+Volume=/srv/n8n/data:/home/node/.n8n:Z
+
+Label=io.containers.autoupdate=registry
+
+[Install]
+WantedBy=multi-user.target

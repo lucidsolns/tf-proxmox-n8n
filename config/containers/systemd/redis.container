@@ -1,0 +1,21 @@
+[Unit]
+Description=Redis (n8n)
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=docker.io/library/redis:6-alpine
+ContainerName=redis
+Network=db_bridge.network
+PublishPort=127.0.0.1:6379:6379
+PublishPort=[::1]:6379:6379
+
+Volume=/srv/redis:/data:Z
+
+HealthCmd=redis-cli ping
+HealthInterval=5s
+HealthTimeout=5s
+HealthRetries=10
+
+[Install]
+WantedBy=multi-user.target

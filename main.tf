@@ -12,7 +12,7 @@ module "n8n" {
   vm_description = "A Flatcar VM with docker compose running n8n (nodemation) instance"
   vm_id          = var.vm_id
   node_name      = var.node_name
-  tags           = ["n8n", "flatcar", "dozzle"]
+  tags           = ["n8n", "flatcar", "podman"]
   cpu = {
     cores = 2
     type  = "x86-64-v3"
@@ -35,8 +35,6 @@ module "n8n" {
 
     # Shared secret between n8n containers and runners sidecars
     N8N_RUNNERS_AUTH_TOKEN=random_password.n8n_auth_token.result
-
-    DOZZLE_USERS_YAML_URI = module.dozzle_users.yaml_data_uri
 
     #  Optional timezone to set which gets used by Cron and other scheduling nodes
     #  see:
@@ -95,14 +93,4 @@ resource "random_password" "n8n_auth_token" {
 resource "random_password" "n8n_encryption_key" {
   length  = 64    # number of characters
   special = false # include special chars
-}
-
-/*
-   Create a simple logging service with dozzle. This isn't persistent logging.
-
-   see:
-     - https://github.com/lucidsolns/tf-proxmox-verdant-uptime-kuma/tree/main/dozzle
-*/
-module dozzle_users {
-  source = "git::https://github.com/lucidsolns/tf-proxmox-verdant-uptime-kuma.git//dozzle?ref=main"
 }

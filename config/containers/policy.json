@@ -1,0 +1,26 @@
+{
+  "default": [
+    {
+      "type": "reject"
+    }
+  ],
+  "transports": {
+    "docker": {
+      "docker.io/library": [
+        {
+          "type": "insecureAcceptAnything"
+        }
+      ],
+      "docker.io/n8nio": [
+        {
+          "type": "insecureAcceptAnything"
+        }
+      ],
+      "docker.n8n.io/n8nio": [
+        {
+          "type": "insecureAcceptAnything"
+        }
+      ]
+    }
+  }
+}

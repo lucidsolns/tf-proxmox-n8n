@@ -68,7 +68,6 @@ storage:
       with_mount_unit: true
 
   directories:
-    - path: /srv/dozzle
 
     # Create a data directory inside the postgres volume for the database data. If
     # the root of a volume is given to postgres it will fail. Postgres runs as user 999.
@@ -106,65 +105,163 @@ storage:
         local: sshd_config
 
 
-    - path: /etc/docker-compose.yaml
-      contents:
-        local: docker-compose.yaml
-
     # write the initial passwords to an environment file that will be provided to docker compose
     #
     # Note: the content is inline so that variable expansion occurs in butane
     #  with the provided butane configuration values.
-    - path: /etc/docker-compose.env
-      mode: 0400
+    - path: /etc/n8n.env
+      overwrite: true
+      mode: 0600
+      contents:
+        inline: |
+          # --- Time ---
+          TZ=${TZ}
+          GENERIC_TIMEZONE=${GENERIC_TIMEZONE}
+          
+          # --- Database ---
+          DB_TYPE=postgresdb
+          DB_POSTGRESDB_HOST=127.0.0.1
+          DB_POSTGRESDB_PORT=5432
+          DB_POSTGRESDB_DATABASE=${POSTGRES_DB}
+          DB_POSTGRESDB_USER=${POSTGRES_USER}
+          DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}
+          
+          # --- Queue / Redis ---
+          # see:
+          #  - https://docs.n8n.io/hosting/configuration/environment-variables/queue-mode/
+          EXECUTIONS_MODE=queue
+          OFFLOAD_MANUAL_EXECUTIONS_TO_WORKERS=true
+          QUEUE_HEALTH_CHECK_ACTIVE=true
+          QUEUE_BULL_REDIS_HOST=127.0.0.1
+          QUEUE_BULL_REDIS_PORT=6379
+          QUEUE_BULL_REDIS_DUALSTACK=false
+          
+          # --- Security ---
+          # Master key used to encrypt sensitive credentials that n8n stores    
+          N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+          N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
+          N8N_RESTRICT_FILE_ACCESS_TO=/home/node
+          N8N_GIT_NODE_DISABLE_BARE_REPOS=true
+          
+          # --- Networking ---
+          N8N_HOST=${N8N_HOST}
+          N8N_PROTOCOL=https
+          WEBHOOK_URL=https://${N8N_HOST}
+          N8N_PROXY_HOPS=1
+          
+          # --- Runners ---
+          N8N_RUNNERS_ENABLED=true
+          N8N_RUNNERS_MODE=external
+          # Shared secret between n8n containers and runners sidecars    
+          N8N_RUNNERS_AUTH_TOKEN=${N8N_RUNNERS_AUTH_TOKEN}
+          N8N_RUNNERS_BROKER_LISTEN_ADDRESS=0.0.0.0
+
+
+    - path: /etc/n8n-runner-1.env
+      overwrite: true
+      mode: 0600
       contents:
         inline: |
           TZ=${TZ}
           GENERIC_TIMEZONE=${GENERIC_TIMEZONE}
-          
+
           N8N_HOST=${N8N_HOST}
-
-          # Master key used to encrypt sensitive credentials that n8n stores    
-          N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
-          
-          # Shared secret between n8n containers and runners sidecars    
           N8N_RUNNERS_AUTH_TOKEN=${N8N_RUNNERS_AUTH_TOKEN}
+          N8N_RUNNERS_TASK_BROKER_URI=http://127.0.0.1:5679
 
+    - path: /etc/n8n-runner-2.env
+      overwrite: true
+      mode: 0600
+      contents:
+        inline: |
+          TZ=${TZ}
+          GENERIC_TIMEZONE=${GENERIC_TIMEZONE}
+
+          N8N_HOST=${N8N_HOST}
+          N8N_RUNNERS_AUTH_TOKEN=${N8N_RUNNERS_AUTH_TOKEN}
+          N8N_RUNNERS_TASK_BROKER_URI=http://127.0.0.1:5681
+
+
+    - path: /etc/postgres.env
+      overwrite: true
+      mode: 0600
+      contents:
+        inline: |
           POSTGRES_USER=${POSTGRES_USER}
           POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
           POSTGRES_DB=${POSTGRES_DB}
-          
 
-    # Store the dozzle users in the VM (they will be lost if the VM is destroyed)
-    - path: /srv/dozzle/users.yaml
+    # Add a Postgresql configuration file for the logging. The logging by default
+    # is going to stderr as text lines, which means systemd thinks the messages are
+    # errors. Use JSON structured logging instead.
+    - path: /etc/postgresql/postgresql.conf
       overwrite: true
+      user:
+        id: 999
+      group:
+        id: 999
+      mode: 0644
       contents:
-        source: ${DOZZLE_USERS_YAML_URI}
+        inline: |
+          log_destination=jsonlog 
+          logging_collector=off
 
-    # Download the 'docker-compose' sysext. It is important to note that the
+
+    # Download the 'podman' sysext. It is important to note that the
     # download will require network connectivity (which won't have been setup
     # at this stage as the networkd file won't have been written, so the network
     # will either need to get an address via DHCP, or a kernel command line configuration.
     #
+    # Note that the podman sysext is an official, but an opt-in sysext. This means it is
+    # downloaded from the official release channel (rather than from the bakery).
+    #
     # see:
     #  - https://flatcar.github.io/sysext-bakery/docker_compose/
     #  - https://flatcar.github.io/sysext-bakery/
+    #  - https://github.com/flatcar/sysext-bakery
+    #  - https://www.flatcar.org/docs/latest/provisioning/sysext/#flatcar-release-extensions-official
     #  - https://www.flatcar.org/docs/latest/provisioning/ignition/network-configuration/
-    - path: /opt/extensions/docker-compose/docker-compose-${DOCKER_COMPOSE_SYSEXT_VERSION}.raw
+    - path: /opt/extensions/flatcar-podman/flatcar-podman.raw
       mode: 0644
       contents:
-        source: https://extensions.flatcar.org/extensions/docker-compose-${DOCKER_COMPOSE_SYSEXT_VERSION}.raw
+        source: https://stable.release.flatcar-linux.net/amd64-usr/4459.2.2/flatcar-podman.raw
+
+  trees:
+    # Podman policy configuration and quadlet configuration
+    - local: containers
+      path: /etc/containers
+
 
   links:
-    - target: /opt/extensions/docker-compose/docker-compose-${DOCKER_COMPOSE_SYSEXT_VERSION}.raw
-      path: /etc/extensions/docker-compose.raw
+    # Enable podman that is downloaded above
+    - target: /opt/extensions/flatcar-podman/flatcar-podman.raw
+      path: /etc/extensions/flatcar-podman.raw
       hard: false
 
-systemd:
-  units:
-    - name: docker-compose.service
-      enabled: true
-      contents_local: docker-compose.service
+    # Disable docker
+    - path: /etc/extensions/docker-flatcar.raw
+      target: /dev/null
+      overwrite: true
 
-    - name: macvlan.service
-      enabled: true
-      contents_local: macvlan.service
+    # Disable containerd
+    - path: /etc/extensions/containerd-flatcar.raw
+      target: /dev/null
+      overwrite: true
+
+    # Setup two runners, one for main and one for the worker
+    - path: /etc/containers/systemd/n8n-runner@1.container
+      target: /etc/containers/systemd/n8n-runner@.container
+    - path: /etc/containers/systemd/n8n-runner@2.container
+      target: /etc/containers/systemd/n8n-runner@.container
+#systemd:
+#  units:
+#    # Enable runner instance 1
+#    - name: n8n-runner@1.service
+#      enabled: true
+#      mask: false
+#
+#    # Enable runner instance 2
+#    - name: n8n-runner@2.service
+#      enabled: true
+#      mask: false
+#

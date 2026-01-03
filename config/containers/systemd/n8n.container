@@ -1,0 +1,25 @@
+#  Node Automation - Nodemation - n8n
+#
+#  see:
+#   https://docs.podman.io/en/latest/markdown/podman-systemd.unit.5.html
+#
+[Unit]
+Description=n8n main
+After=postgres.service redis.service
+Wants=postgres.service redis.service
+
+[Container]
+Image=docker.n8n.io/n8nio/n8n:latest
+ContainerName=n8n
+Network=host
+
+EnvironmentFile=/etc/n8n.env
+
+Volume=/srv/n8n/data:/home/node/.n8n:Z
+
+PublishPort=5678:5678
+
+Label=io.containers.autoupdate=registry
+
+[Install]
+WantedBy=multi-user.target
