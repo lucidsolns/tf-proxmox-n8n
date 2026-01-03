@@ -1,0 +1,170 @@
+# Configuration for the Flatcar VM, with support for terraform template substitution.
+#
+# see
+#   - https://coreos.github.io/butane/config-flatcar-v1_1/
+#   - https://coreos.github.io/butane/config-flatcar-v1_0/
+#   - https://coreos.github.io/butane/
+#
+version: 1.1.0
+variant: flatcar
+
+passwd:
+  users:
+    - name: core
+      ssh_authorized_keys:
+        - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFkyaM9D4TtCOSdIR8JvH5DCt0UHbfPGx7VlSJrP593N greg-ed25519
+
+storage:
+  disks:
+    # Partition the sparse ZFS zvol with a GPT, with a single partition. This will be used for
+    # the database, and should not be overwritten.
+    #
+    # The device 'virtio1' maps to the second virtual device `/dev/vdb`
+    - device: /dev/vdb
+      wipe_table: false
+      partitions:
+        - label: postgres-data
+          number: 1
+          wipe_partition_entry: false
+          # see:
+          #  - https://uapi-group.org/specifications/specs/discoverable_partitions_specification/
+          #  - https://en.wikipedia.org/wiki/GUID_Partition_Table
+
+    - device: /dev/vdc
+      wipe_table: false
+      partitions:
+        - label: n8n-data
+          number: 1
+          wipe_partition_entry: false
+
+    - device: /dev/vdd
+      wipe_table: false
+      partitions:
+        - label: redis-data
+          number: 1
+          wipe_partition_entry: false
+
+  filesystems:
+
+    - device: /dev/disk/by-partlabel/postgres-data
+      path: /srv/postgres
+      format: ext4
+      wipe_filesystem: false
+      label: postgres-data
+      with_mount_unit: true
+
+    - device: /dev/disk/by-partlabel/n8n-data
+      path: /srv/n8n
+      format: ext4
+      wipe_filesystem: false
+      label: n8n-data
+      with_mount_unit: true
+
+    - device: /dev/disk/by-partlabel/redis-data
+      path: /srv/redis
+      format: ext4
+      wipe_filesystem: false
+      label: redis-data
+      with_mount_unit: true
+
+  directories:
+    - path: /srv/dozzle
+
+    # Create a data directory inside the postgres volume for the database data. If
+    # the root of a volume is given to postgres it will fail. Postgres runs as user 999.
+    - path: /srv/postgres/data
+      user:
+        id: 999
+      group:
+        id: 1000
+
+    # Create a data directory for n8n with the permission 1000:1000
+    - path: /srv/n8n/data
+      user:
+        id: 1000
+      group:
+        id: 1000
+
+  files:
+    - path: /etc/hostname
+      mode: 0644
+      contents:
+        inline: ${vm_name}
+
+    - path: /etc/systemd/network/10-eth0.network
+      contents:
+        local: eth0.network
+
+    # Locks down the ssh daemon.
+    #
+    # see:
+    #  - https://www.flatcar.org/docs/latest/setup/security/customizing-sshd/
+    - path: /etc/ssh/sshd_config
+      overwrite: true
+      mode: 0600
+      contents:
+        local: sshd_config
+
+
+    - path: /etc/docker-compose.yaml
+      contents:
+        local: docker-compose.yaml
+
+    # write the initial passwords to an environment file that will be provided to docker compose
+    #
+    # Note: the content is inline so that variable expansion occurs in butane
+    #  with the provided butane configuration values.
+    - path: /etc/docker-compose.env
+      mode: 0400
+      contents:
+        inline: |
+          TZ=${TZ}
+          GENERIC_TIMEZONE=${GENERIC_TIMEZONE}
+          
+          N8N_HOST=${N8N_HOST}
+
+          # Master key used to encrypt sensitive credentials that n8n stores    
+          N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+          
+          # Shared secret between n8n containers and runners sidecars    
+          N8N_RUNNERS_AUTH_TOKEN=${N8N_RUNNERS_AUTH_TOKEN}
+
+          POSTGRES_USER=${POSTGRES_USER}
+          POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+          POSTGRES_DB=${POSTGRES_DB}
+          
+
+    # Store the dozzle users in the VM (they will be lost if the VM is destroyed)
+    - path: /srv/dozzle/users.yaml
+      overwrite: true
+      contents:
+        source: ${DOZZLE_USERS_YAML_URI}
+
+    # Download the 'docker-compose' sysext. It is important to note that the
+    # download will require network connectivity (which won't have been setup
+    # at this stage as the networkd file won't have been written, so the network
+    # will either need to get an address via DHCP, or a kernel command line configuration.
+    #
+    # see:
+    #  - https://flatcar.github.io/sysext-bakery/docker_compose/
+    #  - https://flatcar.github.io/sysext-bakery/
+    #  - https://www.flatcar.org/docs/latest/provisioning/ignition/network-configuration/
+    - path: /opt/extensions/docker-compose/docker-compose-${DOCKER_COMPOSE_SYSEXT_VERSION}.raw
+      mode: 0644
+      contents:
+        source: https://extensions.flatcar.org/extensions/docker-compose-${DOCKER_COMPOSE_SYSEXT_VERSION}.raw
+
+  links:
+    - target: /opt/extensions/docker-compose/docker-compose-${DOCKER_COMPOSE_SYSEXT_VERSION}.raw
+      path: /etc/extensions/docker-compose.raw
+      hard: false
+
+systemd:
+  units:
+    - name: docker-compose.service
+      enabled: true
+      contents_local: docker-compose.service
+
+    - name: macvlan.service
+      enabled: true
+      contents_local: macvlan.service

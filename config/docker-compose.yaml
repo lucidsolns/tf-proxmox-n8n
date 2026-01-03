@@ -1,0 +1,241 @@
+---
+name: n8n
+
+# Shared configuration for all n8n containers
+#
+# Use a YAML anchor to avoid duplicating the shared configuration.
+#
+#
+# see:
+#  - https://hub.docker.com/r/n8nio/n8n
+#  - https://docs.n8n.io/hosting/installation/server-setups/
+x-shared: &shared
+  image: n8nio/n8n:latest
+  restart: always
+  environment:
+    # --- Database (Postgres) ---
+    - DB_TYPE=postgresdb
+    - DB_POSTGRESDB_HOST=postgres
+    - DB_POSTGRESDB_PORT=5432
+    - DB_POSTGRESDB_DATABASE=${POSTGRES_DB}
+    - DB_POSTGRESDB_USER=${POSTGRES_USER}
+    - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}
+    # --- Execution/Queue mode ---
+    - EXECUTIONS_MODE=queue
+    - OFFLOAD_MANUAL_EXECUTIONS_TO_WORKERS=true
+    - QUEUE_HEALTH_CHECK_ACTIVE=true
+    # --- Redis (Bull queue backend) --- see: https://docs.n8n.io/hosting/configuration/environment-variables/queue-mode/
+    - QUEUE_BULL_REDIS_HOST=redis
+    - QUEUE_BULL_REDIS_PORT=6379
+    - QUEUE_HEALTH_CHECK_ACTIVE=true
+    - QUEUE_BULL_REDIS_DUALSTACK=true
+    # --- Security/Runtime ---
+    - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+    - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
+    - N8N_RESTRICT_FILE_ACCESS_TO=/home/node
+    - N8N_GIT_NODE_DISABLE_BARE_REPOS=true
+    # --- Networking/Reverse Proxy ---
+    - N8N_HOST=${N8N_HOST}
+    - N8N_PROTOCOL=https
+    - WEBHOOK_URL=https://${N8N_HOST}
+    - N8N_PROXY_HOPS=1 # Set if using a reverse proxy
+    # --- Task Runners (n8n 2.x) ---
+    - N8N_RUNNERS_ENABLED=true
+    - N8N_RUNNERS_MODE=external
+    - N8N_RUNNERS_AUTH_TOKEN=${N8N_RUNNERS_AUTH_TOKEN}
+    - N8N_RUNNERS_BROKER_LISTEN_ADDRESS=0.0.0.0
+    # --- Misc ---
+    - TZ=${TZ} # Example timezone
+    - GENERIC_TIMEZONE=${GENERIC_TIMEZONE}
+  networks:
+    bridge: {}
+#    macvlan_net:
+#      # a single IPv6 address is supported
+#      ipv6_address: 2407:8b00:1169:21c::100
+#      ipv4_address: 10.20.28.100
+
+    db_bridge: { }
+  links:
+    - postgres
+    - redis
+  volumes:
+    - /srv/n8n/data:/home/node/.n8n
+
+services:
+  # Main n8n service and the webhooks service (see below for worker)
+  #
+  # see:
+  #  - https://hub.docker.com/r/n8nio/n8n
+  n8n:
+    <<: *shared
+    container_name: n8n
+    ports:
+      - 5678:5678
+    networks:
+      bridge: {}
+#      macvlan_net:
+#        # a single IPv6 address is supported
+#        ipv6_address: 2407:8b00:1169:21c::10
+#        ipv4_address: 10.20.28.10
+
+      db_bridge: { }
+
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  # Run one fixed n8n worker in queue mode (using redis as the queue). This is
+  # set above with `EXECUTIONS_MODE`. This has a dependency on the main node
+  #
+  # The worker must have access to the postgres database and the redis.
+  #
+  # see:
+  #   - https://docs.n8n.io/hosting/scaling/queue-mode/#how-it-works
+  n8n-worker:
+    <<: *shared
+    container_name: n8n-worker
+    command: worker
+    networks:
+      bridge: {}
+#      macvlan_net:
+#        # a single IPv6 address is supported
+#        ipv6_address: 2407:8b00:1169:21c::11
+#        ipv4_address: 10.20.28.11
+
+    depends_on:
+      n8n:
+        -
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  #
+  # see:
+  #  - https://hub.docker.com/r/n8nio/runners
+  #  - https://docs.n8n.io/hosting/configuration/task-runners/#setting-up-external-mode
+  n8n-runners-main:
+    image: n8nio/runners:latest
+    container_name: n8n-runners
+    restart: always
+    environment:
+      - N8N_RUNNERS_TASK_BROKER_URI=http://n8n:5679
+      - N8N_RUNNERS_AUTH_TOKEN=${N8N_RUNNERS_AUTH_TOKEN}
+    depends_on:
+      - n8n
+
+  n8n-runners-worker:
+    image: n8nio/runners:latest
+    container_name: n8n-runners-worker
+    restart: always
+    environment:
+      - N8N_RUNNERS_TASK_BROKER_URI=http://n8n-worker:5679
+      - N8N_RUNNERS_AUTH_TOKEN=${N8N_RUNNERS_AUTH_TOKEN}
+    depends_on:
+      - n8n-worker
+  #
+  # see:
+  #  - https://hub.docker.com/_/postgres
+  postgres:
+    image: postgres:16
+    container_name: postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    networks:
+      db_bridge: { }
+    volumes:
+      - /srv/postgres/data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:6-alpine
+    container_name: redis
+    restart: always
+    networks:
+      db_bridge: { }
+    volumes:
+      - /srv/redis:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Expose the docker logs on port 8080 with dozzle
+  dozzle:
+    image: amir20/dozzle:latest
+    container_name: dozzle
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /srv/dozzle:/data
+    ports:
+      - 8080:8080
+    networks:
+      util_bridge:
+    environment:
+      # Uncomment to enable container actions (stop, start, restart). See https://dozzle.dev/guide/actions
+      - DOZZLE_ENABLE_ACTIONS=true
+
+      # Uncomment to allow access to container shells. See https://dozzle.dev/guide/shell
+      - DOZZLE_ENABLE_SHELL=true
+
+      # Use simple authentication. The terraform will provision /srv/dozzle/users.yaml, and the whole
+      # dozzle directory can be added to the container.
+      #
+      # See:
+      #   - https://dozzle.dev/guide/authentication
+      - DOZZLE_AUTH_PROVIDER=simple
+
+    # Low-speed health check on dozzle.
+    # see:
+    #    - https://dozzle.dev/guide/healthcheck
+    healthcheck:
+      test: ["CMD", "/dozzle", "healthcheck"]
+      interval: 60s
+      timeout: 30s
+      retries: 5
+      start_period: 30s
+
+  # Auto upgrade containers with watchtower
+  #
+  # see:
+  #   - https://github.com/containrrr/watchtower/tree/main
+  watchtower:
+    image: containrrr/watchtower
+    container_name: watchtower
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: --interval 300
+    networks:
+      util_bridge:
+
+networks:
+  # This is the default IPv4 bridge - this is used for internal services or those
+  # not needing full IPv6 connectivity.
+  bridge:
+    external: true
+    name: bridge           # Explicitly refer to Docker’s default bridge
+
+  # A bridge (that is not the default bridge) that can coexist with the macvlan network
+  db_bridge:
+    name: db_bridge
+    driver: bridge
+
+  util_bridge:
+    name: util_bridge
+    driver: bridge
+
+  # The docker macvlan interface with dual stack support. This is used for the workloads
+  # that need full IPv6 connectivity.
+  macvlan_net:
+    external: true
+    enable_ipv6: true
