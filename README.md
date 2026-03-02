@@ -15,7 +15,7 @@ The deployment is:
 n8n does not use environment variables for the owner account's email or password. The initial
 owner account is set up interactively when the n8n instance starts for the first time.
 
-Thus I would highly recommend not making the site public until this is done.
+Thus I would highly recommend not making the site public until the password is set.
 
 # Links
 
