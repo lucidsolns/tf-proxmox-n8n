@@ -207,7 +207,7 @@ storage:
           logging_collector=off
 
 
-    # Download the 'podman' sysext. It is important to note that the
+    # Use the 'podman' sysext. It is important to note that the
     # download will require network connectivity (which won't have been setup
     # at this stage as the networkd file won't have been written, so the network
     # will either need to get an address via DHCP, or a kernel command line configuration.
@@ -216,28 +216,22 @@ storage:
     # downloaded from the official release channel (rather than from the bakery).
     #
     # see:
-    #  - https://flatcar.github.io/sysext-bakery/docker_compose/
+    #  - https://www.flatcar.org/docs/latest/provisioning/sysext/
     #  - https://flatcar.github.io/sysext-bakery/
     #  - https://github.com/flatcar/sysext-bakery
     #  - https://www.flatcar.org/docs/latest/provisioning/sysext/#flatcar-release-extensions-official
     #  - https://www.flatcar.org/docs/latest/provisioning/ignition/network-configuration/
-    - path: /opt/extensions/flatcar-podman/flatcar-podman.raw
-      mode: 0644
+    - path: /etc/flatcar/enabled-sysext.conf
       contents:
-        source: https://stable.release.flatcar-linux.net/amd64-usr/4459.2.2/flatcar-podman.raw
+        inline: |
+          podman
 
   trees:
     # Podman policy configuration and quadlet configuration
     - local: containers
       path: /etc/containers
 
-
   links:
-    # Enable podman that is downloaded above
-    - target: /opt/extensions/flatcar-podman/flatcar-podman.raw
-      path: /etc/extensions/flatcar-podman.raw
-      hard: false
-
     # Disable docker
     - path: /etc/extensions/docker-flatcar.raw
       target: /dev/null
@@ -253,15 +247,13 @@ storage:
       target: /etc/containers/systemd/n8n-runner@.container
     - path: /etc/containers/systemd/n8n-runner@2.container
       target: /etc/containers/systemd/n8n-runner@.container
-#systemd:
-#  units:
-#    # Enable runner instance 1
-#    - name: n8n-runner@1.service
-#      enabled: true
-#      mask: false
-#
-#    # Enable runner instance 2
-#    - name: n8n-runner@2.service
-#      enabled: true
-#      mask: false
-#
+
+systemd:
+  units:
+    # A service run once a week to clean up dangling containers
+    - name: podman-prune.service
+      contents_local: podman-prune.service
+
+    - name: podman-prune.timer
+      enabled: true
+      contents_local: podman-prune.timer

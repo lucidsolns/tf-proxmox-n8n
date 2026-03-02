@@ -6,7 +6,7 @@
  */
 module "n8n" {
   source  = "lucidsolns/flatcar-vm/proxmox"
-  version = "1.0.14"
+  version = "1.0.15"
 
   vm_name        = "amber.lucidsolutions.co.nz"
   vm_description = "A Flatcar VM with docker compose running n8n (nodemation) instance"
